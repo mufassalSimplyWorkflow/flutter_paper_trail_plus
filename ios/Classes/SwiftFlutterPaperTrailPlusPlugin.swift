@@ -91,7 +91,6 @@ public class SwiftFlutterPaperTrailPlusPlugin: NSObject, FlutterPlugin {
             return
         }
         
-        // Update the program name with user ID
         let originalProgramName = SwiftFlutterPaperTrailPlusPlugin.programName ?? "app"
         logger.programName = "\(userId)-\(originalProgramName)"
         
@@ -102,7 +101,7 @@ public class SwiftFlutterPaperTrailPlusPlugin: NSObject, FlutterPlugin {
         do {
             let (message, level) = try validateLogParams(call.arguments)
             
-            if isConnectionActive, let logger = logger, isLoggerReady(logger) {
+            if isConnectionActive, isLoggerReady() {
                 dispatchLog(message: message, level: level)
                 result("Log sent successfully")
             } else {
@@ -125,7 +124,6 @@ public class SwiftFlutterPaperTrailPlusPlugin: NSObject, FlutterPlugin {
             return
         }
 
-        // Clean up previous logger if exists
         if let existingLogger = logger {
             DDLog.remove(existingLogger)
         }
@@ -136,17 +134,21 @@ public class SwiftFlutterPaperTrailPlusPlugin: NSObject, FlutterPlugin {
         paperTrailLogger.programName = programName
         paperTrailLogger.machineName = machineName
         
-        // Configure socket settings
         if let socket = paperTrailLogger.value(forKey: "socket") as? GCDAsyncSocket {
             socket.isIPv4PreferredOverIPv6 = true
             socket.isIPv6Enabled = false
-            socket.delegate = self
         }
         
         self.logger = paperTrailLogger
         DDLog.add(paperTrailLogger)
-        
-        print("PaperTrail logger initialized: \(hostName):\(port)")
+    }
+
+    private func isLoggerReady() -> Bool {
+        guard let logger = logger,
+              let socket = logger.value(forKey: "socket") as? GCDAsyncSocket else {
+            return false
+        }
+        return socket.isConnected
     }
 
     private func attemptReconnect() {
@@ -161,7 +163,7 @@ public class SwiftFlutterPaperTrailPlusPlugin: NSObject, FlutterPlugin {
             for attempt in 1...SwiftFlutterPaperTrailPlusPlugin.maxRetryAttempts {
                 self?.initializeLogger()
                 
-                if let logger = self?.logger, self?.isLoggerReady(logger) == true {
+                if self?.isLoggerReady() == true {
                     print("Reconnected successfully after \(attempt) attempts")
                     self?.processPendingLogs()
                     return
@@ -183,13 +185,6 @@ public class SwiftFlutterPaperTrailPlusPlugin: NSObject, FlutterPlugin {
         result("Reconnection attempted")
     }
 
-    private func isLoggerReady(_ logger: RMPaperTrailLogger) -> Bool {
-        if let socket = logger.value(forKey: "socket") as? GCDAsyncSocket {
-            return socket.isConnected
-        }
-        return false
-    }
-
     // MARK: - Network Monitoring
 
     private func startNetworkMonitoring() {
@@ -205,13 +200,11 @@ public class SwiftFlutterPaperTrailPlusPlugin: NSObject, FlutterPlugin {
                     self.isConnectionActive = newStatus
                     
                     if newStatus {
-                        // When connection returns, completely reinitialize
                         DispatchQueue.main.asyncAfter(deadline: .now() + 1.0) {
                             self.initializeLogger()
                             self.processPendingLogs()
                         }
                     } else {
-                        // Immediately mark logger as not ready
                         if let logger = self.logger {
                             DDLog.remove(logger)
                         }
@@ -236,7 +229,7 @@ public class SwiftFlutterPaperTrailPlusPlugin: NSObject, FlutterPlugin {
     }
 
     private func processPendingLogs() {
-        guard isConnectionActive, let logger = logger, isLoggerReady(logger), !pendingLogs.isEmpty else {
+        guard isConnectionActive, isLoggerReady(), !pendingLogs.isEmpty else {
             return
         }
         
@@ -262,10 +255,10 @@ public class SwiftFlutterPaperTrailPlusPlugin: NSObject, FlutterPlugin {
         let status: [String: Any] = [
             "initialized": isInitialized,
             "connected": isConnectionActive,
-            "loggerReady": isConnectionActive && (logger?.isReady ?? false),
+            "loggerReady": isConnectionActive && isLoggerReady(),
             "pendingLogs": pendingLogs.count,
             "hostName": SwiftFlutterPaperTrailPlusPlugin.hostName ?? "null",
-            "port": SwiftFlutterPaperTrailPlusPlugin.port ?? 0  // Now correctly returns the configured port
+            "port": SwiftFlutterPaperTrailPlusPlugin.port ?? 0
         ]
         result(status)
     }
@@ -368,15 +361,5 @@ extension FlutterError {
             message: error.localizedDescription,
             details: nil
         )
-    }
-}
-
-extension SwiftFlutterPaperTrailPlusPlugin: GCDAsyncSocketDelegate {
-    public func socket(_ sock: GCDAsyncSocket, didConnectToHost host: String, port: UInt16) {
-        print("Socket connected to \(host):\(port)")
-    }
-    
-    public func socketDidDisconnect(_ sock: GCDAsyncSocket, withError err: Error?) {
-        print("Socket disconnected: \(err?.localizedDescription ?? "no error")")
     }
 }

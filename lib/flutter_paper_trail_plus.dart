@@ -1,19 +1,11 @@
 import 'dart:async';
 import 'package:flutter/services.dart';
 
-/// A Flutter plugin for integrating with PaperTrail log service.
 class FlutterPaperTrailPlus {
   static const MethodChannel _channel =
-      const MethodChannel('flutter_paper_trail_plus');
+      MethodChannel('flutter_paper_trail_plus');
 
-  /// Initializes the logger for sending logs to PaperTrail.
-  ///
-  /// Throws [PlatformException] if initialization fails.
-  ///
-  /// - [hostName]: The hostname of the PaperTrail server (e.g., 'logsX.papertrailapp.com')
-  /// - [port]: The port number to connect to (typically between 1-65535)
-  /// - [programName]: The name of the program or application
-  /// - [machineName]: The name of the machine or device
+  /// Initializes the PaperTrail logger
   static Future<void> initLogger({
     required String hostName,
     required int port,
@@ -23,20 +15,16 @@ class FlutterPaperTrailPlus {
     try {
       await _channel.invokeMethod('initLogger', {
         'hostName': hostName,
-        'machineName': machineName,
+        'port': port.toString(),
         'programName': programName,
-        'port': port.toString(), // Convert to string for consistency
+        'machineName': machineName,
       });
     } on PlatformException catch (e) {
       throw PaperTrailException('Failed to initialize logger: ${e.message}');
     }
   }
 
-  /// Sets the user ID for the logs.
-  ///
-  /// Throws [PlatformException] if operation fails.
-  ///
-  /// - [userId]: The user ID to associate with the logs
+  /// Sets the user ID for log tagging
   static Future<void> setUserId(String userId) async {
     try {
       await _channel.invokeMethod('setUserId', {'userId': userId});
@@ -45,42 +33,26 @@ class FlutterPaperTrailPlus {
     }
   }
 
-  /// Gets the current status of the logger.
-  ///
-  /// Returns a map containing:
-  /// - initialized: bool
-  /// - connected: bool
-  /// - loggerReady: bool
-  /// - pendingLogs: int
-  /// - hostName: String
-  /// - port: int
-  ///
-  /// Throws [PlatformException] if status retrieval fails.
-  static Future<Map<String, dynamic>> getStatus() async {
+  /// Gets the current logger status
+  static Future<PaperTrailStatus> getStatus() async {
     try {
-      final status =
-          await _channel.invokeMethod<Map<dynamic, dynamic>>('getStatus');
-      return _parseStatus(status ?? {});
+      final status = await _channel.invokeMethod<Map>('getStatus');
+      return PaperTrailStatus.fromMap(Map<String, dynamic>.from(status ?? {}));
     } on PlatformException catch (e) {
       throw PaperTrailException('Failed to get status: ${e.message}');
     }
   }
 
-  /// Parses the status map from the platform channel
-  static Map<String, dynamic> _parseStatus(Map<dynamic, dynamic> status) {
-    return {
-      'initialized': status['initialized'] as bool? ?? false,
-      'connected': status['connected'] as bool? ?? false,
-      'loggerReady': status['loggerReady'] as bool? ?? false,
-      'pendingLogs': status['pendingLogs'] as int? ?? 0,
-      'hostName': status['hostName'] as String? ?? '',
-      'port': int.tryParse(status['port']?.toString() ?? '0') ?? 0,
-    };
+  /// Forces a reconnection attempt
+  static Future<void> forceReconnect() async {
+    try {
+      await _channel.invokeMethod('forceReconnect');
+    } on PlatformException catch (e) {
+      throw PaperTrailException('Failed to reconnect: ${e.message}');
+    }
   }
 
-  /// Flushes any pending logs that were queued while offline.
-  ///
-  /// Throws [PlatformException] if operation fails.
+  /// Flushes pending logs
   static Future<void> flush() async {
     try {
       await _channel.invokeMethod('flush');
@@ -89,57 +61,18 @@ class FlutterPaperTrailPlus {
     }
   }
 
-  /// Logs an error message to PaperTrail.
-  ///
-  /// Throws [PaperTrailException] if logging fails after retries.
-  ///
-  /// - [message]: The error message to log
-  static Future<void> logError(String message) async {
-    return _log(message, 'error');
-  }
+  // Logging methods
+  static Future<void> logError(String message) => _log(message, 'error');
+  static Future<void> logWarning(String message) => _log(message, 'warning');
+  static Future<void> logInfo(String message) => _log(message, 'info');
+  static Future<void> logDebug(String message) => _log(message, 'debug');
+  static Future<void> logVerbose(String message) => _log(message, 'verbose');
 
-  /// Logs a warning message to PaperTrail.
-  ///
-  /// Throws [PaperTrailException] if logging fails after retries.
-  ///
-  /// - [message]: The warning message to log
-  static Future<void> logWarning(String message) async {
-    return _log(message, 'warning');
-  }
-
-  /// Logs an informational message to PaperTrail.
-  ///
-  /// Throws [PaperTrailException] if logging fails after retries.
-  ///
-  /// - [message]: The information message to log
-  static Future<void> logInfo(String message) async {
-    return _log(message, 'info');
-  }
-
-  /// Logs a debug message to PaperTrail.
-  ///
-  /// Throws [PaperTrailException] if logging fails after retries.
-  ///
-  /// - [message]: The debug message to log
-  static Future<void> logDebug(String message) async {
-    return _log(message, 'debug');
-  }
-
-  /// Logs a verbose message to PaperTrail.
-  ///
-  /// Throws [PaperTrailException] if logging fails after retries.
-  ///
-  /// - [message]: The verbose message to log
-  static Future<void> logVerbose(String message) async {
-    return _log(message, 'verbose');
-  }
-
-  /// Internal method to log a message with a specific log level.
-  static Future<void> _log(String message, String logLevel) async {
+  static Future<void> _log(String message, String level) async {
     try {
       await _channel.invokeMethod('log', {
         'message': message,
-        'logLevel': logLevel,
+        'logLevel': level,
       });
     } on PlatformException catch (e) {
       throw PaperTrailException('Failed to log message: ${e.message}');
@@ -147,7 +80,42 @@ class FlutterPaperTrailPlus {
   }
 }
 
-/// Exception thrown when PaperTrail operations fail.
+class PaperTrailStatus {
+  final bool initialized;
+  final bool connected;
+  final bool loggerReady;
+  final int pendingLogs;
+  final String hostName;
+  final int port;
+
+  PaperTrailStatus({
+    required this.initialized,
+    required this.connected,
+    required this.loggerReady,
+    required this.pendingLogs,
+    required this.hostName,
+    required this.port,
+  });
+
+  factory PaperTrailStatus.fromMap(Map<String, dynamic> map) {
+    return PaperTrailStatus(
+      initialized: map['initialized'] as bool? ?? false,
+      connected: map['connected'] as bool? ?? false,
+      loggerReady: map['loggerReady'] as bool? ?? false,
+      pendingLogs: map['pendingLogs'] as int? ?? 0,
+      hostName: map['hostName'] as String? ?? '',
+      port: int.tryParse(map['port']?.toString() ?? '0') ?? 0,
+    );
+  }
+
+  @override
+  String toString() {
+    return 'PaperTrailStatus(initialized: $initialized, connected: $connected, '
+        'loggerReady: $loggerReady, pendingLogs: $pendingLogs, '
+        'hostName: $hostName, port: $port)';
+  }
+}
+
 class PaperTrailException implements Exception {
   final String message;
   PaperTrailException(this.message);
